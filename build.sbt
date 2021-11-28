@@ -1,4 +1,8 @@
-val scala3Version = "3.0.0"
+import sbt.enablePlugins
+
+val scala3Version = "3.1.0"
+
+ThisBuild / scalafmtOnCompile := true
 
 lazy val root = project
   .in(file("."))
