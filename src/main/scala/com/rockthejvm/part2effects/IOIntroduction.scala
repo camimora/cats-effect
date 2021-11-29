@@ -4,7 +4,7 @@ import cats.effect.IO
 
 import scala.io.StdIn
 
-object IOIntroduction {
+object IOIntroduction:
 
   // IO
   val ourFirstIO: IO[Int] = IO.pure(42) // arg that should not have side effects
@@ -20,24 +20,22 @@ object IOIntroduction {
 
   // map, flatMap
   val improvedMeaningOfLife = ourFirstIO.map(_ * 2)
-  val printedMeaningOfLife = ourFirstIO.flatMap(mol => IO.delay(println(mol)))
+  val printedMeaningOfLife  = ourFirstIO.flatMap(mol => IO.delay(println(mol)))
 
-  def smallProgram(): IO[Unit] = for {
+  def smallProgram(): IO[Unit] = for
     line1 <- IO(StdIn.readLine())
     line2 <- IO(StdIn.readLine())
-    _ <- IO.delay(println(line1 + line2))
-  } yield ()
+    _     <- IO.delay(println(line1 + line2))
+  yield ()
 
   // mapN - combine IO effects as tuples
-  import cats.syntax.apply._
+  import cats.syntax.apply.*
   val combinedMeaningOfLife: IO[Int] = (ourFirstIO, improvedMeaningOfLife).mapN(_ + _)
   def smallProgram_v2(): IO[Unit] =
     (IO(StdIn.readLine()), IO(StdIn.readLine())).mapN(_ + _).map(println)
 
-
-  /**
-   * Exercises
-   */
+  /** Exercises
+    */
 
   // 1 - sequence two IOs and take the result of the LAST one
   // hint: use flatMap
@@ -92,28 +90,28 @@ object IOIntroduction {
 
   // 6 - fix stack recursion
   def sum(n: Int): Int =
-    if (n <= 0) 0
+    if n <= 0 then 0
     else n + sum(n - 1)
 
   def sumIO(n: Int): IO[Int] =
-    if (n <= 0) IO(0)
-    else for {
-      lastNumber <- IO(n)
-      prevSum <- sumIO(n - 1)
-    } yield prevSum + lastNumber
+    if n <= 0 then IO(0)
+    else
+      for
+        lastNumber <- IO(n)
+        prevSum    <- sumIO(n - 1)
+      yield prevSum + lastNumber
 
   // 7 (hard) - write a fibonacci IO that does NOT crash on recursion
   // hints: use recursion, ignore exponential complexity, use flatMap heavily
   def fibonacci(n: Int): IO[BigInt] =
-    if (n < 2) IO(1)
-    else for {
-      last <- IO.defer(fibonacci(n - 1)) // same as .delay(...).flatten
-      prev <- IO.defer(fibonacci(n - 2))
-    } yield last + prev
+    if n < 2 then IO(1)
+    else
+      for
+        last <- IO.defer(fibonacci(n - 1)) // same as .delay(...).flatten
+        prev <- IO.defer(fibonacci(n - 2))
+      yield last + prev
 
-  def main(args: Array[String]): Unit = {
+  def main(args: Array[String]): Unit =
     import cats.effect.unsafe.implicits.global // "platform"
     // "end of the world"
     (1 to 100).foreach(i => println(fibonacci(i).unsafeRunSync()))
-  }
-}
