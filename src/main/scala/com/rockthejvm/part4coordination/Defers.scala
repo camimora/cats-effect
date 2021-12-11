@@ -5,6 +5,13 @@ import cats.syntax.traverse.*
 import com.rockthejvm.utils.*
 
 import scala.concurrent.duration.*
+import cats.effect.kernel.Outcome
+import cats.effect.kernel.Outcome.Succeeded
+import cats.effect.kernel.Outcome.Errored
+import cats.effect.kernel.Outcome.Canceled
+import cats.effect.FiberIO
+import cats.effect.kernel.Fiber
+import cats.syntax.all.*
 
 object Defers extends IOApp.Simple {
 
@@ -98,5 +105,106 @@ object Defers extends IOApp.Simple {
     } yield ()
   }
 
-  override def run = fileNotifierWithDeferred()
+  def alarmNotification(): IO[Unit] =
+    val refSeconds: IO[Ref[IO, Int]] = IO.ref(0)
+    val defAlarm: IO[Deferred[IO, Unit]] = IO.deferred
+
+    def ticking(refSeconds: Ref[IO, Int], defAlarm: Deferred[IO, Unit]): IO[Unit] =
+      for
+        _ <- IO("Ticking...").debug
+        _ <- IO.sleep(1.second)
+        updatedSeconds <- refSeconds.updateAndGet(_ + 1)
+        _ <- IO(s"Ticking updated: $updatedSeconds").debug
+        _ <- if updatedSeconds == 10 then defAlarm.complete(()) else ticking(refSeconds, defAlarm)
+      yield ()
+
+    def alarmLogger(defAlarm: Deferred[IO, Unit]): IO[Unit] =
+      for
+        _ <- IO("Logger, waiting ...").debug
+        _ <- defAlarm.get
+        _ <- IO("ALARM!!! ACHTUNG!!! ACHTUNG!!!").debug
+      yield ()
+
+    for
+      ref <- refSeconds
+      defe <- defAlarm
+      fibTick <- ticking(ref, defe).start
+      fibAlarm <- alarmLogger(defe).start
+      _ <- fibTick.join
+      _ <- fibAlarm.join
+    yield ()
+
+  //2
+
+  
+  def task1(): IO[Unit] = 
+      IO("[Fib1] Starting").debug >> 
+        IO.sleep(2.seconds) >> 
+        IO("[Fib1] Finishing").debug.void // >> defe.complete(Outcome.succeeded(IO.unit)).void
+
+    def task2(): IO[Unit] = 
+      IO("[Fib2] Starting").debug >> 
+        IO.sleep(1.seconds) >> 
+        IO("[Fib2] Finishing").debug.void // >> defe.complete(Outcome.succeeded(IO.unit)).void
+
+  type EitherOutcomes[A, B] = Either[Outcome[IO, Throwable, A], Outcome[IO, Throwable, B]]
+  type MySignal[A, B] =  IO[Deferred[IO, EitherOutcomes[A, B]]]
+
+  // def deferredRacePair[A, B](io1: IO[A], io2: IO[B]): IO[Either[(Outcome[IO, Throwable, A], FiberIO[B]), (FiberIO[A], Outcome[IO, Throwable, B])]] =
+  def deferredRacePair[A, B](io1: IO[A], io2: IO[B]): IO[Either[(Outcome[IO, Throwable, A], FiberIO[B]), (FiberIO[A], Outcome[IO, Throwable, B])]] =
+
+    def signal: MySignal[A, B] = IO.deferred
+
+    def refFiberLeft: IO[Ref[IO, Option[FiberIO[A]]]] = IO.ref[Option[FiberIO[A]]](None)
+    def refFiberRight: IO[Ref[IO, Option[FiberIO[B]]]] = IO.ref[Option[FiberIO[B]]](None)
+    
+    def runLeft(io: IO[A], defe: Deferred[IO, EitherOutcomes[A, B]], ref: Ref[IO, Option[FiberIO[A]]]): IO[Unit] = 
+      for
+        fibL <- io.start
+        _ <- IO("[Left] Setting fiber ref").debug >> ref.updateAndGet(_ => fibL.some).debug
+        res <- fibL.join 
+        _ <- defe.complete(Left(res)) 
+      yield ()
+    
+    def runRight(io: IO[B], defe: Deferred[IO, EitherOutcomes[A, B]], ref: Ref[IO, Option[FiberIO[B]]]): IO[Unit] = 
+      for
+        fib <- io.start
+        _ <- IO("[Right] Setting fiber ref").debug >> ref.updateAndGet(_ => fib.some).debug
+        res <- fib.join 
+        _ <- defe.complete(Right(res)) 
+      yield ()
+
+    for
+      mySignal <- signal
+      leftRef <- refFiberLeft
+      rightRef <- refFiberRight
+      _ <- runLeft(io1, mySignal, leftRef).start
+      _ <- runRight(io2, mySignal, rightRef).start
+      res <- mySignal.get
+      leftFib <- leftRef.get
+      rightFib <- rightRef.get
+    yield 
+      res match
+        case Left(io1Res) => Left(io1Res, rightFib.get)
+        case Right(io2Res) => Right(leftFib.get, io2Res)
+
+    // for
+    //   defe <- signal
+    //   fib1 <- io1.start.guaranteeCase{ 
+    //     case Succeeded(res) => res.flatMap(_.join.flatMap(r1 => defe.complete(Left(r1)).void)) 
+    //     case Errored(e) => defe.complete(Left(Errored(e))).void
+    //     case Canceled() => defe.complete(Left(Canceled())).void
+    //   }
+    //   fib2 <- io2.start.guaranteeCase{
+    //     case Succeeded(res) => defe.complete(Right(Succeeded(res))).void
+    //     case Errored(e) => defe.complete(Right(Errored(e))).void
+    //     case Canceled() => defe.complete(Right(Canceled())).void
+    //   }
+    //   outcomeFirst <- defe.get
+    // yield 
+    //   outcomeFirst match
+    //     case Left(res) => Left((res, fib2))
+    //     case Right(res) => Right((fib1, res))
+
+  override def run = deferredRacePair(task1(), task2()).debug.void
 }
